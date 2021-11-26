@@ -1,0 +1,2 @@
+"","pathway","pval","padj","ES","NES","nMoreExtreme","size","leadingEdge"
+"1","DODD_NASOPHARYNGEAL_CARCINOMA_UP",0.0692934782608696,0.0692934782608696,0.607469871346236,1.41874990021083,50,16,"c(`241452` = ""Dhrs9"", `11744` = ""Anxa11"", `54357` = ""Epb41l4b"", `432516` = ""Myo1a"", `26397` = ""Map2k3"", `12337` = ""Capn5"", `16554` = ""Kif13b"")"

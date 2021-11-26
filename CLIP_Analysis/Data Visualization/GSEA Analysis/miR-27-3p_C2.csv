@@ -1,0 +1,2 @@
+"","pathway","pval","padj","ES","NES","nMoreExtreme","size","leadingEdge"
+"1","GRAESSMANN_APOPTOSIS_BY_DOXORUBICIN_UP",0.00759493670886076,0.0455696202531646,0.713961830726938,1.66532039699017,5,15,"c(`667034` = ""Pnp2"", `102502` = ""Pls1"", `30943` = ""Prss30"", `20908` = ""Stx3"", `105501` = ""Abhd4"", `14645` = ""Glul"", `18557` = ""Cdk18"")"

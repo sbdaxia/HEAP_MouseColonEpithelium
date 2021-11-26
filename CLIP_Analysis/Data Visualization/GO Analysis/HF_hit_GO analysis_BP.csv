@@ -1,0 +1,4 @@
+"","ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count"
+"GO:0030048","GO:0030048","actin filament-based movement","5/33","21/2376",6.56031979353399e-06,0.00662592299146933,0.00607692780874727,"Vil1/Jup/Dsp/Actn4/Myh14",5
+"GO:0045103","GO:0045103","intermediate filament-based process","4/33","14/2376",2.80296999946895e-05,0.0094366656648788,0.00865478455976377,"Krt20/Dsp/Krt18/Plec",4
+"GO:0045104","GO:0045104","intermediate filament cytoskeleton organization","4/33","14/2376",2.80296999946895e-05,0.0094366656648788,0.00865478455976377,"Krt20/Dsp/Krt18/Plec",4

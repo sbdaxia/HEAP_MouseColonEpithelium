@@ -1,0 +1,157 @@
+---
+title: "Peak heatmap"
+author: "Bing Shui"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: yes
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Prepare libraies
+```{r}
+suppressMessages(
+suppressWarnings(
+  c(library(data.table),
+    library(tidyverse),
+    library(rtracklayer),
+    library(DESeq2),
+    library(Biostrings),
+    library(genomation),
+    library(RColorBrewer),
+    library(CLIPanalyze))
+  )
+)
+```
+## Load miR-peaks dataset
+```{r}
+mirs.peaks <- readRDS("Datafiles/miRNA-peaks-list-12232019.rds")
+```
+
+## Analysis
+Prepare bw file for visualization
+```{bash eval = F}
+# combine bigwig files of the same genotype
+$ bigWigMerge Exp-HF1_LIB044916_GEN00173026_R1_barcode.uniq.bw Exp-HF2_LIB044916_GEN00173029_R1_barcode.uniq.bw Exp-HF3_LIB044916_GEN00173032_R1_barcode.uniq.bw HF_merged.bedGraph
+
+$ bigWigMerge Exp-HFK1_LIB044916_GEN00173035_R1_barcode.uniq.bw Exp-HFK2_LIB044916_GEN00173038_R1_barcode.uniq.bw Exp-HFK3_LIB044916_GEN00173041_R1_barcode.uniq.bw HFK_merged.bedGraph
+```
+
+convert chromosome name from Ensembl to UCSC format.
+```{r eval = F}
+chromosomename <- read.table("../Joint_analysis/Ensembl.mm10.chrom.sizes.txt", sep = "\t")[,1][1:22]
+hf_bed <- read.table("../Joint_analysis/HF_merged.bedGraph", sep = "\t")
+hf_bed <- hf_bed %>% filter(V1 %in% chromosomename)
+hf_bed$V1 <- paste0("chr", hf_bed$V1)
+hf_bed$V1[hf_bed$V1 == "chrMT"] <- "chrM"
+write_delim(hf_bed, file = "../Joint_analysis/HF_merged_edited.bedGraph", delim = "\t", col_names = F)
+
+hfk_bed <- read.table("../Joint_analysis/HFK_merged.bedGraph", sep = "\t")
+hfk_bed <- hfk_bed %>% filter(V1 %in% chromosomename)
+hfk_bed$V1 <- paste0("chr", hfk_bed$V1)
+hfk_bed$V1[hfk_bed$V1 == "chrMT"] <- "chrM"
+write_delim(hfk_bed, file = "../Joint_analysis/HFK_merged_edited.bedGraph", delim = "\t", col_names = F)
+
+```
+
+```{bash eval = F}
+# bedGraph to bigWig conversion
+$ awk 'NR!=1' HF_merged_edited.bedGraph > input.HF_merged.bedGraph
+$ sort -k1,1 -k2,2n input.HF_merged.bedGraph > sorted.input.HF_merged.bedGraph
+$ bedGraphToBigWig sorted.input.HF_merged.bedGraph mm10.chrom.sizes HF_merged.bw
+
+$ awk 'NR!=1' HFK_merged_edited.bedGraph > input.HFK_merged.bedGraph
+$ sort -k1,1 -k2,2n input.HFK_merged.bedGraph > sorted.input.HFK_merged.bedGraph
+$ bedGraphToBigWig sorted.input.HFK_merged.bedGraph mm10.chrom.sizes HFK_merged.bw
+```
+
+```{r}
+peaks <- mirs.peaks
+peaks <- lapply(peaks, FUN = function(x) {x[order(x$count, decreasing = T)]})
+peaks <- lapply(peaks, FUN = function(x) {x[x$padj<=0.01]})
+mybw.dir <- "../Joint_analysis"
+mybw.files <- list.files(mybw.dir, pattern = "bw$", full.names = T)[7:8]
+print(mybw.files)
+
+cols <- brewer.pal(name = "Set2", n = 8)
+reds <- brewer.pal(name = "Reds", n = 9)
+blues <- brewer.pal(name = "Blues", n = 9)
+mycolors <-c(blues[6], reds[6]) #HF, HFK
+light.colors <- alpha(c(blues[3], reds[2]), 0.4)
+```
+
+### Histogram
+histogram plot function
+```{r}
+#plot histograms
+peaks_meta <- function(mypeaks = peaks, 
+                       miRNA_family = "miR-451a", 
+                       dispersion = "se",
+                       dispersion.col = NULL,
+                       coordinates = c(-400, 400), 
+                       line.col = mycolors, 
+                       winsorize = c(0,99),
+                       title = ""){
+  
+  suppressWarnings(mypeaks <- lapply(mypeaks, FUN = function(x) {resize(x, width = sum(abs(coordinates)), fix="center")}))
+  mypeaks <- GRangesList(mypeaks)
+  mysml <- ScoreMatrixList(targets=mybw.files, window=mypeaks[[miRNA_family]], type = "bigWig", strand.aware = T)
+  mysampleInfo <- data.frame(basename(mybw.files), c("HF", "HFK"))
+  names(mysampleInfo) = c("sample", "genotype")
+  names(mysml) = mysampleInfo$genotype[match(names(mysml), mysampleInfo$sample)]
+  plotMeta(mysml, profile.names = c("HF", "HFK"), xcoords = coordinates, dispersion = dispersion, main =title, line.col = line.col, winsorize = winsorize, dispersion.col = dispersion.col)
+}
+```
+
+```{r}
+len <- sapply(mirs.peaks, function(x) length(x))
+mirs.peaks <- mirs.peaks[order(-len)]
+mirna <- names(mirs.peaks)
+
+for (i in 1:10) {
+  peaks_meta(mypeaks = peaks, dispersion  = NULL, miRNA_family = mirna[i], title = mirna[i])
+  peaks_meta(mypeaks = peaks, dispersion  = "se", miRNA_family = mirna[i], title = mirna[i],
+           dispersion.col = light.colors)
+}
+```
+
+### Heatmap
+plot heatmaps
+```{r}
+peaks_heat <- function(mypeaks = peaks, 
+                       miRNA_family = "miR-451", 
+                       col = blues9, 
+                       coordinates = c(-400, 400), 
+                       order_rows = F, 
+                       winsorize_parameters = c(1,98)){
+  suppressWarnings(mypeaks <- lapply(mypeaks, FUN = function(x) {resize(x, width = sum(abs(coordinates)), fix="center")}))
+  mypeaks <- GRangesList(mypeaks)
+  mysml <- ScoreMatrixList(targets=mybw.files[c(1,2)], window=mypeaks[[miRNA_family]], type = "bigWig", strand.aware = T)
+  mysampleInfo <- data.frame(basename(mybw.files), c("HF", "HFK"))
+  names(mysampleInfo) = c("sample", "genotype")
+  names(mysml) = paste(mysampleInfo$genotype[match(names(mysml), mysampleInfo$sample)], miRNA_family , sep = "_")
+  mysml.scaled = scaleScoreMatrixList(mysml)
+  #multiHeatMatrix(mysml.scaled, xcoords = coordinates, col = col)
+  multiHeatMatrix(mysml, common.scale = T, xcoords = coordinates, winsorize = winsorize_parameters, col = col, order = order_rows)
+}
+```
+
+```{r}
+colfunc <- colorRampPalette(c("white", "blue"))
+mycols <- colfunc(128)
+```
+
+```{r fig.height=8, fig.width=8}
+for (i in 1:10) {
+  peaks_heat(mypeaks = peaks, miRNA_family = mirna[i], col = blues9, winsorize_parameters = c(0,99))
+}
+```
+
+### SessionInfo
+```{r}
+sessionInfo()
+```

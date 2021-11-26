@@ -1,0 +1,271 @@
+---
+title: "Merge peaks"
+author: "Bing Shui"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: yes
+    toc_float: true
+---
+
+# Library set-up
+```{r message=FALSE, warning=FALSE}
+library(CLIPanalyze)
+library(tidyverse)
+library(GenomicRanges)
+library(Rsubread)
+library(data.table)
+library(rtracklayer)
+library(Rsamtools)
+library(DESeq2)
+library(ensembldb)
+library(EnsDb.Mmusculus.v79)
+library(org.Mm.eg.db)
+library(AnnotationDbi)
+```
+
+# Read in peak data
+Peak data called individually in HF and HFK conditions are loaded and will be combined. Result GRanges will be used for call counts.
+
+```{r}
+hf.peak <- readRDS("peakdata.HF.rds")
+hf.peak <- hf.peak$peaks
+hfk.peak <- readRDS("peakdata.HFK.rds")
+hfk.peak <- hfk.peak$peaks
+```
+
+# Merge and annotate peaks
+```{r eval = F}
+hf.specific.peak <- hf.peak[!hf.peak %over% hfk.peak,]
+merged.peak <- c(hf.specific.peak,hfk.peak)
+names(merged.peak) <- paste0("peak", seq(1:length(merged.peak)))
+merged.peak$name <- names(merged.peak)
+
+## annotate the merged.peaks with target gene name
+merged.peak$'target_gene' <- NA
+for (i in 1:length(merged.peak)) {
+  if (!is.na(merged.peak$utr3[i]) | !is.na(merged.peak$`utr3*`[i])) {
+    gene_name <- unique(c(merged.peak$utr3[i],merged.peak$`utr3*`[i]))
+    gene_name <- gene_name[!is.na(gene_name)] 
+    merged.peak$'target_gene'[i] <- paste(unlist(gene_name), collapse = " ")
+  }
+  else {
+    gene_name <- unique(c(merged.peak$exon[i], merged.peak$intron[i],merged.peak$utr5[i],merged.peak$`utr5*`[i]))
+    gene_name <- gene_name[!is.na(gene_name)]
+    if (length(gene_name) >0) {
+    merged.peak$'target_gene'[i] <- paste(unlist(gene_name), collapse = " ")
+    }
+  }
+}
+
+merged.peak$padj <- NULL
+merged.peak$log2FC <- NULL
+saveRDS(merged.peak, "peaks-merged.rds")
+```
+
+# Prepare annotation file for `featureCount`
+We will use any exon and all the merged peaks.
+```{r}
+merged.peak <- readRDS("peaks-merged.rds")
+
+annots <- loadAnnot("mm10")
+exons <- exonsBy(annots$txdb, by = "gene")
+exons <- unlist(exons)
+exons.genes <- names(exons)
+exons.table <- as.data.table(exons) %>%
+    dplyr::select(Chr = seqnames, Start = start, End = end, Strand = strand)
+exons.table$GeneID <- exons.genes
+merged.peaks.table <- as.data.frame(merged.peak) %>%
+    dplyr::select(GeneID = name, Chr = seqnames,
+                  Start = start, End = end, Strand = strand)
+```
+
+# Load `bam` files
+```{r}
+hf.bam.files <- list.files("../HF_Analysis/", pattern=".bam$", full.names = TRUE)
+hfk.bam.files <- list.files("../HFK_Analysis/", pattern=".bam$", full.names = TRUE)
+all.bam.files <- c(hf.bam.files, hfk.bam.files)
+
+sample.names <- c("HF1", "HF2", "HF3", "HF1-input", "HF2-input", "HF3-input","HFK1", "HFK2", "HFK3", "HFK1-input", "HFK2-input", "HFK3-input")
+```
+
+# Read count
+## Peak
+```{r}
+peak.count <-
+    featureCounts(all.bam.files, annot.ext = merged.peaks.table,
+                  isPairedEnd = FALSE, minOverlap = 1,
+                  countChimericFragments = FALSE, nthreads = 14, strandSpecific = 1)
+
+peak.count <- peak.count$counts
+colnames(peak.count) <- sample.names
+```
+
+## Genes
+```{r}
+gene.all.count <-
+    featureCounts(all.bam.files, annot.ext = exons.table,
+                  isPairedEnd = FALSE, minOverlap = 1,
+                  countChimericFragments = FALSE, nthreads = 14, strandSpecific = 1)
+
+gene.all.count <- gene.all.count$counts
+colnames(gene.all.count) <- sample.names
+genes <- annots$genenames %>% as.data.frame()
+gene.all.count <- gene.all.count %>% as.data.frame() %>% rownames_to_column(var = "gene_id")
+
+gene.all.count <- left_join(gene.all.count, genes[,c(1,2)], by = c("gene_id" = "gene_id"))
+
+
+# exlude genes with peaks in there
+
+gene.exclude.peak <- gene.all.count[!gene.all.count$gene_name %in% merged.peak$target_gene, ]
+rownames(gene.exclude.peak) <- gene.exclude.peak$gene_id
+gene.exclude.peak <- gene.exclude.peak %>% dplyr::select(-c("gene_name", "gene_id"))
+gene.exclude.peak  <- gene.exclude.peak[rowMeans(gene.exclude.peak) > 0, ]
+
+```
+
+# DESeq
+## Genes outside of peaks
+```{r}
+dir.create("PDF_figure", showWarnings = FALSE)
+dds.genes <-
+    DESeqDataSetFromMatrix(gene.exclude.peak,
+                           colData =
+                               DataFrame(tumor = factor(c(rep("HF", 6),
+                                                          rep("HFK", 6))),
+                                         heap = factor(c(rep("HEAP", 3),
+                                                         rep("input", 3),
+                                                         rep("HEAP", 3),
+                                                         rep("input", 3)),
+                                                       levels = c("input", 
+                                                                  "HEAP"))),
+                           design = ~heap)
+dds.genes <- DESeq(dds.genes)
+
+plotMA(dds.genes,
+       main = "MA plot for all HEAP vs IC\n in genes outside peaks")
+
+pdf("PDF_figure/HEAPvIC_GeneOutsidePeaks.pdf",
+    width = 5,
+    height = 4)
+plotMA(dds.genes,
+       main = "MA plot for all HEAP vs IC\n in genes outside peaks")
+dev.off()
+```
+
+## Peaks
+```{r}
+dds.peaks <-
+    DESeqDataSetFromMatrix(peak.count,
+                           colData =
+                               DataFrame(tumor = factor(c(rep("HF", 6),
+                                                          rep("HFK", 6))),
+                                         heap = factor(c(rep("HEAP", 3),
+                                                         rep("input", 3),
+                                                         rep("HEAP", 3),
+                                                         rep("input", 3)),
+                                                       levels = c("input", 
+                                                                  "HEAP"))),
+                           design = ~heap)
+
+sizeFactors(dds.peaks) <- sizeFactors(dds.genes)
+dds.peaks <- DESeq(dds.peaks)
+
+plotMA(dds.peaks,
+       main = "MA plot for all HEAP vs IC\n in peaks")
+
+pdf("PDF_figure/HEAPvIC_GeneInPeaks.pdf",
+    width = 5,
+    height = 4)
+plotMA(dds.peaks,
+       main = "MA plot for all HEAP vs IC\n in peaks")
+dev.off()
+```
+
+# Peak filtering
+```{r}
+hf.select.peaks <- readRDS("peaks-HF-selected.rds")
+rtracklayer::export(hf.select.peaks, "HF_filtered_peaks.bed")
+
+hfk.select.peaks <- readRDS("peaks-HFK-selected.rds")
+rtracklayer::export(hfk.select.peaks, "HFK_filtered_peaks.bed")
+
+hf.select.specific.peak <- hf.select.peaks[!hf.select.peaks %over% hfk.select.peaks,]
+merged.selected.peak <- c(hf.select.specific.peak, hfk.select.peaks)
+names(merged.selected.peak) <- paste0("peak", seq(1:length(merged.selected.peak)))
+merged.selected.peak$name <- names(merged.selected.peak)
+
+filtered.peaks <- subsetByOverlaps(merged.peak, merged.selected.peak)
+rtracklayer::export(filtered.peaks, "Merged_filtered_peaks.bed")
+
+filtered.peak.count <- peak.count[rownames(peak.count) %in% filtered.peaks$name, ]
+
+```
+
+
+
+
+
+
+
+# HF/HFK comparison in peaks
+```{r}
+peak.count.hf.hfk <- filtered.peak.count[, c(1:3,7:9)]
+dds.peaks.hf.hfk <-
+    DESeqDataSetFromMatrix(peak.count.hf.hfk,
+                           colData =
+                               DataFrame(tumor = factor(c(rep("HF", 3),
+                                                          rep("HFK", 3)))),
+                           design = ~tumor)
+
+sizeFactors(dds.peaks.hf.hfk) <- sizeFactors(dds.genes)[c(1:3,7:9)]
+dds.peaks.hf.hfk <- DESeq(dds.peaks.hf.hfk)
+
+plotMA(dds.peaks.hf.hfk,
+       main = "MA plot for all HFK vs HF\n in peaks")
+
+pdf("PDF_figure/HFKvHF_InPeaks.pdf",
+    width = 5,
+    height = 4)
+plotMA(dds.peaks.hf.hfk,
+       main = "MA plot for all HFK vs HF\n in peaks")
+dev.off()
+
+hfk.hf.res <- results(dds.peaks.hf.hfk, contrast = c("tumor", "HFK", "HF"))
+
+save(merged.peak, filtered.peaks, dds.genes, dds.peaks, dds.peaks.hf.hfk, hfk.hf.res, file = "merged_peak_analysis.rda")
+```
+
+# HF/HFK comparison in genes outside of peaks
+```{r}
+gene.exclude.peak.hf.hfk <- gene.exclude.peak[, c(1:3,7:9)]
+dds.gene.exclude.peak.hf.hfk <-
+    DESeqDataSetFromMatrix(gene.exclude.peak.hf.hfk,
+                           colData =
+                               DataFrame(tumor = factor(c(rep("HF", 3),
+                                                          rep("HFK", 3)))),
+                           design = ~ tumor)
+
+sizeFactors(dds.gene.exclude.peak.hf.hfk) <- sizeFactors(dds.genes)[c(1:3,7:9)]
+dds.gene.exclude.peak.hf.hfk <- DESeq(dds.gene.exclude.peak.hf.hfk)
+
+plotMA(dds.gene.exclude.peak.hf.hfk,
+       main = "MA plot for all HFK vs HF\n in gene outside of peaks")
+
+pdf("PDF_figure/HFKvHF_OutsidePeaks.pdf",
+    width = 5,
+    height = 4)
+plotMA(dds.gene.exclude.peak.hf.hfk,
+       main = "MA plot for all HFK vs HF\n in gene outside of peaks")
+dev.off()
+
+hfk.hf.gene.exclude.peak.res <- results(dds.gene.exclude.peak.hf.hfk, contrast = c("tumor", "HFK", "HF"))
+
+summary(hfk.hf.gene.exclude.peak.res)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,15 @@
+
+	Position file = Kmer/merged.hf.up-peaks-k7-windows.bed
+	Genome = mm10
+	Output Directory = Kmer/homer-denovo-output-merged.hf.up-peaks-k7
+	background position file: Kmer/merged.hf.up-peaks-k7-windows-background.bed
+	Motif length set at 8,
+	Using actual sizes of regions (-size given)
+	Fragment size set to given
+	Operating in RNA mode
+	Will not adjust sequences for CG content
+	Will normalize background sequences for oligos of length 2 bp
+	Total number of sequences (including background) to use: 200000
+	Using 10 CPUs
+	Using 1000 MB for statistics cache
+!!! Could not open peak/position file Kmer/merged.hf.up-peaks-k7-windows.bed !!!
