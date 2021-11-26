@@ -32,6 +32,8 @@ library(plotly)
 ```
 # Load dataset information
 ```{r}
+dir.create("PDF_figure/T6B_derepression_CDF_merged", showWarnings = FALSE)
+
 peaks.mir <- readRDS("Datafiles/merged-peaks-mirs-200-12232019-withID.rds")
 mirs.peaks <- readRDS("Datafiles/miRNA-merged-peaks-list-12232019-withIDs.rds")
 
@@ -113,6 +115,19 @@ plotCDF.ggplot(T6B_DGE,
                title = "RNA_LFC(T6B/control)",
                legend.size = 15
                )
+
+pdf("PDF_figure/T6B_derepression_CDF_merged/T6B_CDF_miRNAover200.pdf",
+    height = 8,
+    width = 10)
+plotCDF.ggplot(T6B_DGE,
+               list(T6B_DGE$gene, peaks.mir$target_Ensembl_ID),
+               c("All genes", "miRNAs over 200"),
+               col = c("grey15", cols[1]),
+               linetype = c(1, 1),
+               title = "RNA_LFC(T6B/control)",
+               legend.size = 15
+               )
+dev.off()
 ```
 
 ```{r}
@@ -130,6 +145,21 @@ for (i in 1:10) {
                legend.size = 15
                )
 }
+
+pdf("PDF_figure/T6B_derepression_CDF_merged/T6B_CDF_top10miRNA.pdf",
+    height = 8,
+    width = 10)
+for (i in 1:10) {
+  plotCDF.ggplot(T6B_DGE,
+               list(T6B_DGE$gene, mirs.peaks[[i]]$target_Ensembl_ID),
+               c("All genes", mirna[i]),
+               col = c("grey15", cols[i]),
+               linetype = c(1, 1),
+               title = "RNA_LFC(T6B/control)",
+               legend.size = 15
+               )
+}
+dev.off()
 ```
 
 # CDF z-score 
@@ -171,7 +201,7 @@ colnames(zscores.all)[3] <- "N"
 
 ## Plotting
 ```{r}
-ggplot(zscores.all, aes(x = z.score, y = log2(baseMean), size = N)) +
+p1 <- ggplot(zscores.all, aes(x = z.score, y = log2(baseMean), size = N, label = miR.family)) +
   geom_point(colour = "#15CD40", alpha = 0.6) +
   xlab("T6B RNA-Seq Z-score") +
   ylab("miRNA family abundance") +
@@ -190,6 +220,14 @@ ggplot(zscores.all, aes(x = z.score, y = log2(baseMean), size = N)) +
       plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
 
 cor.test(zscores.all$z.score, log2(zscores.all$baseMean))
+
+pdf("PDF_figure/T6B_derepression_CDF_merged/T6B_CDF_zscore.pdf",
+    height = 4,
+    width = 6)
+p1
+dev.off()
+
+ggplotly(p1)
 ```
 
 # Session Info
