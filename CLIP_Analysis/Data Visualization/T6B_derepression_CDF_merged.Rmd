@@ -153,7 +153,7 @@ for (i in 1:10) {
   plotCDF.ggplot(T6B_DGE,
                list(T6B_DGE$gene, mirs.peaks[[i]]$target_Ensembl_ID),
                c("All genes", mirna[i]),
-               col = c("grey15", cols[i]),
+               col = c("grey15", cols[i+1]),
                linetype = c(1, 1),
                title = "RNA_LFC(T6B/control)",
                legend.size = 15
